@@ -114,6 +114,16 @@ def scaled_dot_product_attention(
     mask: Optional[mx.array],
     sinks: Optional[mx.array] = None,
 ) -> mx.array:
+    if getattr(cache, "turboquant", False):
+        if sinks is not None:
+            raise ValueError("TurboQuant SDPA does not support attention sinks.")
+        from mlx_lm.turboquant.attention import (
+            turboquant_scaled_dot_product_attention,
+        )
+
+        return turboquant_scaled_dot_product_attention(
+            queries, keys, values, cache, scale=scale, mask=mask
+        )
     if hasattr(cache, "bits"):
         if sinks is not None:
             raise ValueError("Quantized SDPA does not support attention sinks.")

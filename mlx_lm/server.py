@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import pickle
 import platform
 import socket
@@ -367,8 +368,8 @@ class ModelProvider:
                     "Speculative decoding may not work as expected."
                 )
 
-        # Compute batchability
-        is_batchable = draft_model is None
+        # Compute batchability (TurboQuant caches use the single-request path)
+        is_batchable = draft_model is None and self.cli_args.kv_cache_mode == "fp16"
         is_batchable = is_batchable and all(
             hasattr(c, "merge") for c in make_prompt_cache(model)
         )
@@ -434,6 +435,17 @@ def _format_top_logprobs(logprobs, top_n, tokenizer) -> Tuple[Dict[str, Any]]:
     return tuple(
         {"id": i, "token": s, "logprob": g}
         for i, s, g in zip(top_indices, txts, top_probs)
+    )
+
+
+def _kv_cache_kwargs(cli_args: argparse.Namespace) -> dict:
+    return dict(
+        kv_cache_mode=cli_args.kv_cache_mode,
+        tq_k_bits=cli_args.tq_k_bits,
+        tq_v_bits=cli_args.tq_v_bits,
+        tq_fp16_layers=cli_args.tq_fp16_layers,
+        tq_head_dim=cli_args.tq_head_dim,
+        tq_seed=cli_args.tq_seed,
     )
 
 
@@ -824,6 +836,7 @@ class ResponseGenerator:
                         prefill_batch_size=self.cli_args.prompt_concurrency,
                         prefill_step_size=self.cli_args.prefill_step_size,
                         stream=generation_stream,
+                        **_kv_cache_kwargs(self.cli_args),
                     )
                     unprocessed_requests.append((rqueue, request, args))
                     continue
@@ -967,10 +980,13 @@ class ResponseGenerator:
             )
             ctx.prompt_cache_count = len(prompt) - len(rest)
             cache_key = prompt[:]
+            kv_kwargs = _kv_cache_kwargs(self.cli_args)
             if cache is None:
-                cache = make_prompt_cache(self.model_provider.model)
+                cache = make_prompt_cache(self.model_provider.model, **kv_kwargs)
                 if self.model_provider.draft_model is not None:
-                    cache += make_prompt_cache(self.model_provider.draft_model)
+                    cache += make_prompt_cache(
+                        self.model_provider.draft_model, **kv_kwargs
+                    )
 
             # Process the prompt and generate tokens
             for gen in stream_generate(
@@ -985,6 +1001,7 @@ class ResponseGenerator:
                 num_draft_tokens=args.num_draft_tokens,
                 prompt_progress_callback=progress,
                 prefill_step_size=self.cli_args.prefill_step_size,
+                **kv_kwargs,
             ):
                 finish_reason = gen.finish_reason
                 sm_state, match_sequence, current_state = sm.match(sm_state, gen.token)
@@ -1878,6 +1895,43 @@ def main():
         "--prompt-cache-bytes",
         type=_parse_size,
         help="Maximum size in bytes of the KV caches",
+    )
+    parser.add_argument(
+        "--kv-cache-mode",
+        type=str,
+        choices=["fp16", "tq_asymmetric"],
+        default=os.environ.get("BONSAI_KV_CACHE_MODE", "fp16"),
+        help="KV cache storage mode. tq_asymmetric uses TurboQuant on middle layers.",
+    )
+    parser.add_argument(
+        "--tq-k-bits",
+        type=int,
+        default=4,
+        help="TurboQuant_prod bit width for keys when --kv-cache-mode=tq_asymmetric.",
+    )
+    parser.add_argument(
+        "--tq-v-bits",
+        type=int,
+        default=3,
+        help="TurboQuant_mse bit width for values when --kv-cache-mode=tq_asymmetric.",
+    )
+    parser.add_argument(
+        "--tq-fp16-layers",
+        type=int,
+        default=4,
+        help="FP16 anchor layers at the start and end when using TurboQuant.",
+    )
+    parser.add_argument(
+        "--tq-head-dim",
+        type=int,
+        default=128,
+        help="Attention head dimension when using TurboQuant.",
+    )
+    parser.add_argument(
+        "--tq-seed",
+        type=int,
+        default=42,
+        help="Base RNG seed for per-layer TurboQuant rotations.",
     )
     parser.add_argument(
         "--pipeline",

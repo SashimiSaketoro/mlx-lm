@@ -15,6 +15,12 @@ from .base import create_causal_mask
 def make_prompt_cache(
     model: nn.Module,
     max_kv_size: Optional[int] = None,
+    kv_cache_mode: str = "fp16",
+    tq_k_bits: int = 4,
+    tq_v_bits: int = 3,
+    tq_fp16_layers: int = 4,
+    tq_head_dim: int = 128,
+    tq_seed: int = 42,
 ) -> List[Any]:
     """
     Construct the model's cache for use in generation.
@@ -27,7 +33,32 @@ def make_prompt_cache(
         max_kv_size (Optional[int]): If provided and the model does not have a
             ``make_cache`` method, a ``RotatingKVCache`` is used with a maximum
             size of ``max_kv_size``
+        kv_cache_mode (str): ``fp16`` (default) or ``tq_asymmetric`` for
+            TurboQuant KV compression on middle layers.
+        tq_k_bits (int): TurboQuant_prod bit width for keys (>= 2).
+        tq_v_bits (int): TurboQuant_mse bit width for values (2, 3, or 4).
+        tq_fp16_layers (int): FP16 anchor layers at the start and end.
+        tq_head_dim (int): Attention head dimension.
+        tq_seed (int): Base RNG seed for per-layer rotations.
     """
+    if kv_cache_mode == "tq_asymmetric":
+        from mlx_lm.turboquant.factory import make_turboquant_cache
+
+        return make_turboquant_cache(
+            model,
+            max_kv_size=max_kv_size,
+            k_bits=tq_k_bits,
+            v_bits=tq_v_bits,
+            fp16_layers=tq_fp16_layers,
+            head_dim=tq_head_dim,
+            seed=tq_seed,
+        )
+    if kv_cache_mode != "fp16":
+        raise ValueError(
+            f"Unknown kv_cache_mode={kv_cache_mode!r}. "
+            "Supported: 'fp16', 'tq_asymmetric'."
+        )
+
     if hasattr(model, "make_cache"):
         return model.make_cache()
 
@@ -1761,3 +1792,7 @@ class LRUPromptCache:
                 "n_bytes": self._n_bytes_by_type[cache_type],
             }
         return result
+
+
+# Register TurboQuant cache for load_prompt_cache() class lookup.
+from mlx_lm.turboquant.cache import AsymmetricTurboQuantCache  # noqa: E402,F401

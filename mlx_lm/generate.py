@@ -219,11 +219,54 @@ def setup_arg_parser():
         help="Number of tokens to draft when using speculative decoding.",
         default=3,
     )
+    parser.add_argument(
+        "--kv-cache-mode",
+        type=str,
+        choices=["fp16", "tq_asymmetric"],
+        default="fp16",
+        help="KV cache storage mode. tq_asymmetric uses TurboQuant on middle layers.",
+    )
+    parser.add_argument(
+        "--tq-k-bits",
+        type=int,
+        default=4,
+        help="TurboQuant_prod bit width for keys when --kv-cache-mode=tq_asymmetric.",
+    )
+    parser.add_argument(
+        "--tq-v-bits",
+        type=int,
+        default=3,
+        help="TurboQuant_mse bit width for values when --kv-cache-mode=tq_asymmetric.",
+    )
+    parser.add_argument(
+        "--tq-fp16-layers",
+        type=int,
+        default=4,
+        help="FP16 anchor layers at the start and end when using TurboQuant.",
+    )
+    parser.add_argument(
+        "--tq-head-dim",
+        type=int,
+        default=128,
+        help="Attention head dimension for TurboQuant caches.",
+    )
+    parser.add_argument(
+        "--tq-seed",
+        type=int,
+        default=42,
+        help="Base seed for TurboQuant per-layer rotations.",
+    )
     return parser
 
 
 # A stream on the default device just for generation
-generation_stream = mx.new_thread_local_stream(mx.default_device())
+def _make_generation_stream():
+    if hasattr(mx, "new_thread_local_stream"):
+        return mx.new_thread_local_stream(mx.default_device())
+    return mx.default_stream(mx.default_device())
+
+
+generation_stream = _make_generation_stream()
 
 
 @contextlib.contextmanager
@@ -317,6 +360,12 @@ def generate_step(
     kv_bits: Optional[int] = None,
     kv_group_size: int = 64,
     quantized_kv_start: int = 0,
+    kv_cache_mode: str = "fp16",
+    tq_k_bits: int = 4,
+    tq_v_bits: int = 3,
+    tq_fp16_layers: int = 4,
+    tq_head_dim: int = 128,
+    tq_seed: int = 42,
     prompt_progress_callback: Optional[Callable[[int, int], None]] = None,
     input_embeddings: Optional[mx.array] = None,
 ) -> Generator[Tuple[mx.array, mx.array], None, None]:
@@ -372,6 +421,12 @@ def generate_step(
         prompt_cache = cache.make_prompt_cache(
             model,
             max_kv_size=max_kv_size,
+            kv_cache_mode=kv_cache_mode,
+            tq_k_bits=tq_k_bits,
+            tq_v_bits=tq_v_bits,
+            tq_fp16_layers=tq_fp16_layers,
+            tq_head_dim=tq_head_dim,
+            tq_seed=tq_seed,
         )
 
     prompt_progress_callback = prompt_progress_callback or (lambda *_: None)
@@ -1508,6 +1563,12 @@ class BatchGenerator:
         prefill_batch_size: int = 8,
         prefill_step_size: int = 2048,
         max_kv_size: Optional[int] = None,
+        kv_cache_mode: str = "fp16",
+        tq_k_bits: int = 4,
+        tq_v_bits: int = 3,
+        tq_fp16_layers: int = 4,
+        tq_head_dim: int = 128,
+        tq_seed: int = 42,
         stream=None,
     ):
         self.model = model
@@ -1519,6 +1580,12 @@ class BatchGenerator:
         self.prefill_batch_size = prefill_batch_size
         self.completion_batch_size = max(completion_batch_size, prefill_batch_size)
         self.max_kv_size = max_kv_size
+        self.kv_cache_mode = kv_cache_mode
+        self.tq_k_bits = tq_k_bits
+        self.tq_v_bits = tq_v_bits
+        self.tq_fp16_layers = tq_fp16_layers
+        self.tq_head_dim = tq_head_dim
+        self.tq_seed = tq_seed
 
         self._stream = stream or generation_stream
 
@@ -1655,8 +1722,16 @@ class BatchGenerator:
         return uids
 
     def _make_new_cache(self):
+        cache_kwargs = dict(
+            kv_cache_mode=self.kv_cache_mode,
+            tq_k_bits=self.tq_k_bits,
+            tq_v_bits=self.tq_v_bits,
+            tq_fp16_layers=self.tq_fp16_layers,
+            tq_head_dim=self.tq_head_dim,
+            tq_seed=self.tq_seed,
+        )
         if self.max_kv_size is None:
-            return cache.make_prompt_cache(self.model)
+            return cache.make_prompt_cache(self.model, **cache_kwargs)
 
         return [
             (
@@ -1664,7 +1739,7 @@ class BatchGenerator:
                 if isinstance(ci, KVCache)
                 else ci
             )
-            for ci in cache.make_prompt_cache(self.model)
+            for ci in cache.make_prompt_cache(self.model, **cache_kwargs)
         ]
 
     def _find_uids(self, uids):
@@ -2081,6 +2156,12 @@ def main():
         kv_bits=args.kv_bits,
         kv_group_size=args.kv_group_size,
         quantized_kv_start=args.quantized_kv_start,
+        kv_cache_mode=args.kv_cache_mode,
+        tq_k_bits=args.tq_k_bits,
+        tq_v_bits=args.tq_v_bits,
+        tq_fp16_layers=args.tq_fp16_layers,
+        tq_head_dim=args.tq_head_dim,
+        tq_seed=args.tq_seed,
         draft_model=draft_model,
         num_draft_tokens=args.num_draft_tokens,
     )
