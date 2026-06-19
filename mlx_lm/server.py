@@ -368,10 +368,19 @@ class ModelProvider:
                     "Speculative decoding may not work as expected."
                 )
 
-        # Compute batchability (TurboQuant caches use the single-request path)
-        is_batchable = draft_model is None and self.cli_args.kv_cache_mode == "fp16"
+        # Compute batchability
+        is_batchable = draft_model is None
         is_batchable = is_batchable and all(
-            hasattr(c, "merge") for c in make_prompt_cache(model)
+            hasattr(c, "merge")
+            for c in make_prompt_cache(
+                model,
+                kv_cache_mode=self.cli_args.kv_cache_mode,
+                tq_k_bits=self.cli_args.tq_k_bits,
+                tq_v_bits=self.cli_args.tq_v_bits,
+                tq_fp16_layers=self.cli_args.tq_fp16_layers,
+                tq_head_dim=self.cli_args.tq_head_dim,
+                tq_seed=self.cli_args.tq_seed,
+            )
         )
 
         # Update the member variables

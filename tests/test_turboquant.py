@@ -367,6 +367,66 @@ class TurboQuantTests(unittest.TestCase):
         mx.eval(tq.nbytes, fp16.nbytes)
         self.assertLess(tq.nbytes, fp16.nbytes)
 
+    def test_merge_supports_batching(self):
+        from mlx_lm.turboquant.cache import BatchAsymmetricTurboQuantCache
+        from mlx_lm.generate import _merge_caches
+
+        caches = []
+        for length in (5, 6, 7):
+            cache = AsymmetricTurboQuantCache(head_dim=128, k_bits=4, v_bits=3, seed=7)
+            keys = mx.random.normal(shape=(1, 8, length, 128)).astype(mx.float16)
+            values = mx.random.normal(shape=(1, 8, length, 128)).astype(mx.float16)
+            cache.update_and_fetch(keys, values)
+            caches.append([cache])
+
+        merged = _merge_caches(caches)
+        self.assertEqual(len(merged), 1)
+        self.assertIsInstance(merged[0], BatchAsymmetricTurboQuantCache)
+        self.assertEqual(merged[0]._k_packed.shape[0], 3)
+        self.assertEqual(merged[0].size(), 7)
+
+    def test_batch_prefill_matches_single(self):
+        from mlx_lm.turboquant.cache import BatchAsymmetricTurboQuantCache
+
+        dim = 128
+        keys_a = mx.random.normal(shape=(1, 8, 5, dim)).astype(mx.float16)
+        vals_a = mx.random.normal(shape=(1, 8, 5, dim)).astype(mx.float16)
+        keys_b = mx.random.normal(shape=(1, 8, 3, dim)).astype(mx.float16)
+        vals_b = mx.random.normal(shape=(1, 8, 3, dim)).astype(mx.float16)
+
+        single_a = AsymmetricTurboQuantCache(head_dim=dim, k_bits=4, v_bits=3, seed=7)
+        single_b = AsymmetricTurboQuantCache(head_dim=dim, k_bits=4, v_bits=3, seed=7)
+        single_a.update_and_fetch(keys_a, vals_a)
+        single_b.update_and_fetch(keys_b, vals_b)
+
+        batch = BatchAsymmetricTurboQuantCache.merge([single_a, single_b])
+        extracted_a = batch.extract(0)
+        extracted_b = batch.extract(1)
+        mx.eval(
+            single_a._k_packed,
+            extracted_a._k_packed,
+            single_b._k_packed,
+            extracted_b._k_packed,
+        )
+        self.assertEqual(extracted_a.offset, single_a.offset)
+        self.assertEqual(extracted_b.offset, single_b.offset)
+        self.assertTrue(
+            mx.allclose(
+                extracted_a._k_norms[..., : extracted_a.offset, :].astype(mx.float32),
+                single_a._k_norms[..., : single_a.offset, :].astype(mx.float32),
+                rtol=1e-5,
+                atol=1e-5,
+            )
+        )
+        self.assertTrue(
+            mx.allclose(
+                extracted_b._k_norms[..., : extracted_b.offset, :].astype(mx.float32),
+                single_b._k_norms[..., : single_b.offset, :].astype(mx.float32),
+                rtol=1e-5,
+                atol=1e-5,
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

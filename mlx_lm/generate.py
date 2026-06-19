@@ -909,6 +909,19 @@ def _make_cache(model, left_padding, max_kv_size):
         elif isinstance(c, CacheList):
             return CacheList(*(to_batch_cache(sub_c) for sub_c in c.caches))
         else:
+            from mlx_lm.turboquant.cache import (
+                AsymmetricTurboQuantCache,
+                BatchAsymmetricTurboQuantCache,
+            )
+
+            if isinstance(c, AsymmetricTurboQuantCache):
+                return BatchAsymmetricTurboQuantCache(
+                    left_padding,
+                    head_dim=c.head_dim,
+                    k_bits=c.k_bits,
+                    v_bits=c.v_bits,
+                    seed=c.seed,
+                )
             raise ValueError(f"{type(c)} does not yet support batching")
 
     if hasattr(model, "make_cache"):
