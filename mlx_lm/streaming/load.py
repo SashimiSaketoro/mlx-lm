@@ -8,8 +8,8 @@ from typing import Dict, Optional, Tuple, Union
 import mlx.core as mx
 import mlx.nn as nn
 
-from mlx_lm.tokenizer_utils import TokenizerWrapper, load_tokenizer
-from mlx_lm.utils import _download, _get_classes, load_config
+from mlx_lm.tokenizer_utils import TokenizerWrapper
+from mlx_lm.utils import _download, _get_classes, load_config, load_tokenizer
 
 from .config import StreamingConfig
 from .layer_loader import RollingWindowLoader
