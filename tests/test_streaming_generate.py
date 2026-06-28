@@ -60,6 +60,26 @@ def test_load_streaming_auto_split():
         assert config["num_hidden_layers"] == 2
 
 
+def test_streaming_forward_returns_mx_array():
+    """StreamingModelWrapper forward must return mx.array logits."""
+    with tempfile.TemporaryDirectory() as tmp:
+        model_dir = _build_tiny_model_dir(Path(tmp))
+        model, _, _ = load_streaming(
+            str(model_dir),
+            StreamingConfig(window_size=1, verbose=False),
+            load_tokenizer=False,
+        )
+
+        cache = model.make_cache()
+        inputs = mx.array([[1, 2, 3]])
+        logits = model(inputs, cache=cache)
+        mx.eval(logits)
+
+        assert isinstance(logits, mx.array)
+        assert logits.ndim == 3
+        assert logits.shape[-1] == _tiny_llama_config()["vocab_size"]
+
+
 def test_generate_step_on_streaming_model():
     with tempfile.TemporaryDirectory() as tmp:
         model_dir = _build_tiny_model_dir(Path(tmp))
@@ -78,3 +98,20 @@ def test_generate_step_on_streaming_model():
                 tokens.append(int(token))
 
         assert len(tokens) == 3
+
+
+def test_generate_step_sampling_returns_mx_array_logprobs():
+    """generate_step logprobs must be mx.array through the streaming path."""
+    with tempfile.TemporaryDirectory() as tmp:
+        model_dir = _build_tiny_model_dir(Path(tmp))
+        model, _, _ = load_streaming(
+            str(model_dir),
+            StreamingConfig(window_size=1, verbose=False),
+            load_tokenizer=False,
+        )
+
+        prompt = mx.array([1, 2, 3])
+        for _token, logprobs in generate_step(prompt, model, max_tokens=2):
+            assert isinstance(logprobs, mx.array)
+            assert logprobs.ndim == 1
+            assert logprobs.shape[0] == _tiny_llama_config()["vocab_size"]

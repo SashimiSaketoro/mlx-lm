@@ -345,6 +345,23 @@ class ModelProvider:
                 tokenizer_config=self._tokenizer_config,
                 trust_remote_code=self.cli_args.trust_remote_code,
             )
+        elif getattr(self.cli_args, "streaming", False):
+            if adapter_path is not None or draft_model_path is not None:
+                raise ValueError(
+                    "Layer streaming does not support adapters or draft models"
+                )
+            from mlx_lm.streaming import StreamingConfig, load_streaming
+
+            streaming_config = StreamingConfig(
+                max_memory_gb=self.cli_args.max_memory_gb,
+                window_size=getattr(self.cli_args, "streaming_window", None),
+                verbose=self.cli_args.log_level == "DEBUG",
+            )
+            model, tokenizer, _ = load_streaming(
+                model_path,
+                streaming_config=streaming_config,
+                tokenizer_config=self._tokenizer_config,
+            )
         else:
             model, tokenizer = load(
                 model_path,
@@ -1946,6 +1963,23 @@ def main():
         "--pipeline",
         action="store_true",
         help="Use pipelining instead of tensor parallelism",
+    )
+    parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Enable layer-streaming inference for models larger than RAM.",
+    )
+    parser.add_argument(
+        "--max-memory-gb",
+        type=float,
+        default=20.0,
+        help="Memory budget (GB) for layer window when --streaming is set.",
+    )
+    parser.add_argument(
+        "--streaming-window",
+        type=int,
+        default=None,
+        help="Fixed layer window size (auto-computed if omitted).",
     )
     args = parser.parse_args()
     if mx.metal.is_available():

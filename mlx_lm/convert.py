@@ -97,6 +97,7 @@ def convert(
         Union[Callable[[str, nn.Module, dict], Union[bool, dict]], str]
     ] = None,
     trust_remote_code: bool = False,
+    split_for_streaming: bool = False,
 ):
     # Check the save path is empty
     if isinstance(mlx_path, str):
@@ -171,6 +172,12 @@ def convert(
         tokenizer,
         config,
     )
+
+    if split_for_streaming:
+        from mlx_lm.streaming.split_model import ensure_streaming_layout
+
+        print("[INFO] Splitting weights for layer-streaming inference")
+        ensure_streaming_layout(mlx_path, verbose=True)
 
     if upload_repo is not None:
         upload_to_hub(mlx_path, upload_repo)
@@ -248,6 +255,12 @@ def configure_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--trust-remote-code",
         help="Trust remote code when loading tokenizer.",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--split-for-streaming",
+        help="Split saved weights into per-layer files for streaming inference.",
         action="store_true",
         default=False,
     )
