@@ -40,6 +40,7 @@ setup(
         "mlx_lm.tool_parsers",
         "mlx_lm.chat_templates",
         "mlx_lm.turboquant",
+        "mlx_lm.streaming",
     ],
     python_requires=">=3.8",
     extras_require={
@@ -70,6 +71,7 @@ setup(
             "mlx_lm.share = mlx_lm.share:main",
             "mlx_lm.manage = mlx_lm.manage:main",
             "mlx_lm.upload = mlx_lm.upload:main",
+            "mlx_lm.split_model = mlx_lm.streaming.split_model:main",
         ]
     },
 )

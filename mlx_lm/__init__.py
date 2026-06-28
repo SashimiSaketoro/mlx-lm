@@ -10,6 +10,11 @@ from .convert import convert
 from .generate import batch_generate, generate, stream_generate
 from .utils import load
 
+try:
+    from .streaming import load_streaming
+except ImportError:
+    load_streaming = None
+
 __all__ = [
     "__version__",
     "convert",
@@ -17,4 +22,5 @@ __all__ = [
     "generate",
     "stream_generate",
     "load",
+    "load_streaming",
 ]
