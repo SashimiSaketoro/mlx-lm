@@ -13,6 +13,7 @@ from mlx_lm.utils import _download, _get_classes, load_config, load_tokenizer
 
 from .config import StreamingConfig
 from .layer_loader import RollingWindowLoader
+from .split_model import ensure_streaming_layout
 from .wrapper import StreamingModelWrapper
 
 
@@ -44,7 +45,8 @@ def load_streaming(
     streaming_config: Optional[StreamingConfig] = None,
     tokenizer_config: Optional[dict] = None,
     revision: Optional[str] = None,
-) -> Tuple[StreamingModelWrapper, TokenizerWrapper, Dict]:
+    load_tokenizer: bool = True,
+) -> Tuple[StreamingModelWrapper, Optional[TokenizerWrapper], Dict]:
     """
     Load a model for layer-streaming inference.
 
@@ -67,22 +69,18 @@ def load_streaming(
     model_path = _download(path_or_hf_repo, revision=revision)
     config = load_config(model_path)
 
+    ensure_streaming_layout(model_path, verbose=streaming_config.verbose)
+
     model_class, model_args_class = _get_classes(config)
     model_args = model_args_class.from_dict(config)
     model = model_class(model_args)
 
     fixed_file = model_path / "fixed_weights.safetensors"
-    if fixed_file.exists():
-        fixed_weights = mx.load(str(fixed_file))
-        if hasattr(model, "sanitize"):
-            fixed_weights = model.sanitize(fixed_weights)
-        model.load_weights(list(fixed_weights.items()), strict=False)
-        mx.eval(model.parameters())
-    else:
-        raise FileNotFoundError(
-            f"{fixed_file} not found. Run: python -m mlx_lm.streaming.split_model "
-            f"<model.safetensors> {model_path}"
-        )
+    fixed_weights = mx.load(str(fixed_file))
+    if hasattr(model, "sanitize"):
+        fixed_weights = model.sanitize(fixed_weights)
+    model.load_weights(list(fixed_weights.items()), strict=False)
+    mx.eval(model.parameters())
 
     layer_size = streaming_config.estimate_layer_memory(
         hidden_size=config["hidden_size"],
@@ -106,5 +104,7 @@ def load_streaming(
     wrapped = StreamingModelWrapper(model, loader)
     wrapped.eval()
 
-    tokenizer = load_tokenizer(model_path, tokenizer_config)
+    tokenizer = (
+        load_tokenizer(model_path, tokenizer_config) if load_tokenizer else None
+    )
     return wrapped, tokenizer, config

@@ -109,18 +109,9 @@ class RollingWindowLoader:
     def load_layer(self, layer_idx: int, prefetch: bool = False) -> LayerWeights:
         layer_file = self._layer_files.get(layer_idx)
         if layer_file is None:
-            raw = self._load_from_monolithic(layer_idx)
-            # Prefix keys for mlx-lm load_weights on TransformerBlock
-            weights = {
-                f"{self.layer_key_prefix}.{layer_idx}.{k}": v
-                for k, v in raw.items()
-            }
+            weights = self._load_from_monolithic(layer_idx)
         else:
-            local = mx.load(str(layer_file))
-            weights = {
-                f"{self.layer_key_prefix}.{layer_idx}.{k}": v
-                for k, v in local.items()
-            }
+            weights = mx.load(str(layer_file))
 
         layer_weights = LayerWeights(weights, layer_idx)
         if prefetch and weights:
@@ -151,7 +142,7 @@ class RollingWindowLoader:
             if (
                 layer_idx % self.streaming_config.clear_cache_every_n_layers == 0
             ):
-                mx.metal.clear_cache()
+                mx.clear_cache()
 
         layer_weights = self.load_layer(layer_idx, prefetch=False)
         mx.eval(list(layer_weights.weights.values()))
@@ -168,7 +159,17 @@ class RollingWindowLoader:
 
         return layer_weights
 
+    def get_memory_usage(self) -> dict:
+        total_bytes = sum(layer.memory_bytes for layer in self.layer_queue)
+        return {
+            "loaded_layers": len(self.loaded_layers),
+            "layer_indices": sorted(list(self.loaded_layers)),
+            "total_mb": total_bytes / 1e6,
+            "total_gb": total_bytes / 1e9,
+            "window_size": self.window_size,
+        }
+
     def clear(self):
         self.layer_queue.clear()
         self.loaded_layers.clear()
-        mx.metal.clear_cache()
+        mx.clear_cache()

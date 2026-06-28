@@ -46,5 +46,5 @@ def test_split_and_load_layers():
         lw = loader.get_layer(0)
         assert isinstance(lw.weights, dict)
         assert all(isinstance(v, mx.array) for v in lw.weights.values())
-        key = "model.layers.0.self_attn.q_proj.weight"
-        assert key in lw.weights
+        assert "self_attn.q_proj.weight" in lw.weights
+        assert isinstance(lw.weights["self_attn.q_proj.weight"], mx.array)

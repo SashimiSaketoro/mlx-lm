@@ -5,7 +5,7 @@
 from .config import StreamingConfig
 from .layer_loader import RollingWindowLoader
 from .load import load_streaming
-from .split_model import split_model_by_layers
+from .split_model import ensure_streaming_layout, split_model_by_layers
 from .wrapper import StreamingModelWrapper
 
 __all__ = [
@@ -13,5 +13,6 @@ __all__ = [
     "RollingWindowLoader",
     "load_streaming",
     "split_model_by_layers",
+    "ensure_streaming_layout",
     "StreamingModelWrapper",
 ]

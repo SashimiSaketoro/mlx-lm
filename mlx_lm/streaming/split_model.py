@@ -3,9 +3,10 @@
 """Split monolithic safetensors into per-layer files for streaming inference."""
 
 import argparse
+import glob
 import mlx.core as mx
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 def split_model_by_layers(
@@ -53,6 +54,34 @@ def split_model_by_layers(
         mx.save_safetensors(str(output_dir / "fixed_weights.safetensors"), fixed_dict)
 
     print("Split complete.")
+
+
+def ensure_streaming_layout(
+    model_dir: Path,
+    layer_prefix: str = "model.layers",
+    verbose: bool = False,
+) -> bool:
+    """
+    Ensure a model directory has per-layer safetensors for streaming.
+
+    If ``fixed_weights.safetensors`` is missing, split the first ``model*.safetensors``
+    file in place. Returns True if a split was performed.
+    """
+    model_dir = Path(model_dir)
+    if (model_dir / "fixed_weights.safetensors").exists():
+        return False
+
+    weight_files = sorted(glob.glob(str(model_dir / "model*.safetensors")))
+    if not weight_files:
+        raise FileNotFoundError(
+            f"No model*.safetensors in {model_dir}. "
+            "Convert or download a model first, then enable streaming."
+        )
+
+    if verbose:
+        print(f"Preparing streaming layout in {model_dir}")
+    split_model_by_layers(Path(weight_files[0]), model_dir, layer_prefix)
+    return True
 
 
 def main():

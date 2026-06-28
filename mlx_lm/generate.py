@@ -256,6 +256,23 @@ def setup_arg_parser():
         default=42,
         help="Base seed for TurboQuant per-layer rotations.",
     )
+    parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Enable layer-streaming inference for models larger than RAM.",
+    )
+    parser.add_argument(
+        "--max-memory-gb",
+        type=float,
+        default=20.0,
+        help="Memory budget (GB) for layer window when --streaming is set.",
+    )
+    parser.add_argument(
+        "--streaming-window",
+        type=int,
+        default=None,
+        help="Fixed layer window size (auto-computed if omitted).",
+    )
     return parser
 
 
@@ -2114,13 +2131,29 @@ def main():
             )
     model_path = model_path or DEFAULT_MODEL
 
-    model, tokenizer = load(
-        model_path,
-        adapter_path=args.adapter_path,
-        tokenizer_config=tokenizer_config,
-        model_config={"quantize_activations": args.quantize_activations},
-        trust_remote_code=args.trust_remote_code,
-    )
+    if args.streaming:
+        from mlx_lm.streaming import StreamingConfig, load_streaming
+
+        streaming_config = StreamingConfig(
+            max_memory_gb=args.max_memory_gb,
+            window_size=args.streaming_window,
+            verbose=args.verbose,
+        )
+        model, tokenizer, _ = load_streaming(
+            model_path,
+            streaming_config=streaming_config,
+            tokenizer_config=tokenizer_config,
+        )
+        if args.verbose:
+            print(model.get_stats())
+    else:
+        model, tokenizer = load(
+            model_path,
+            adapter_path=args.adapter_path,
+            tokenizer_config=tokenizer_config,
+            model_config={"quantize_activations": args.quantize_activations},
+            trust_remote_code=args.trust_remote_code,
+        )
     for eos_token in args.extra_eos_token:
         tokenizer.add_eos_token(eos_token)
 

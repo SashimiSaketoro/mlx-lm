@@ -12,44 +12,62 @@ from mlx_lm.models.base import create_attention_mask
 from .layer_loader import RollingWindowLoader
 
 
-class StreamingModelWrapper(nn.Module):
+class StreamingModelWrapper:
     """
     Wraps an mlx-lm model and loads layer weights on demand.
 
     Compatible with ``mlx_lm.generate`` — exposes the same ``__call__`` signature
     and delegates KV cache handling to the underlying architecture.
+
+    The wrapped model is stored privately (not as an nn.Module child) to avoid
+    conflicting with MLX parameter tracking during per-layer load_weights.
     """
 
     def __init__(self, model: nn.Module, loader: RollingWindowLoader):
-        super().__init__()
-        self.inner = model
-        object.__setattr__(self, "loader", loader)
+        self._model = model
+        self.loader = loader
         self._streaming_enabled = self._detect_streaming_support()
 
     def _detect_streaming_support(self) -> bool:
-        inner = getattr(self.inner, "model", None)
+        inner = getattr(self._model, "model", None)
         return inner is not None and hasattr(inner, "layers")
 
     @property
     def args(self):
-        return self.inner.args
+        return self._model.args
 
     def make_cache(self):
-        if hasattr(self.inner, "make_cache"):
-            return self.inner.make_cache()
-        inner = self.inner.model
+        if hasattr(self._model, "make_cache"):
+            return self._model.make_cache()
+        inner = self._model.model
         return [None] * len(inner.layers)
 
     def sanitize(self, weights):
-        if hasattr(self.inner, "sanitize"):
-            return self.inner.sanitize(weights)
+        if hasattr(self._model, "sanitize"):
+            return self._model.sanitize(weights)
         return weights
 
+    def set_dtype(self, dtype):
+        if hasattr(self._model, "set_dtype"):
+            self._model.set_dtype(dtype)
+        return self
+
     def __getattr__(self, name):
-        try:
-            return super().__getattr__(name)
-        except AttributeError:
-            return getattr(self.inner, name)
+        if name in ("_model", "loader", "_streaming_enabled"):
+            raise AttributeError(name)
+        return getattr(self._model, name)
+
+    def get_stats(self) -> dict:
+        """Memory and window statistics for streaming inference."""
+        usage = self.loader.get_memory_usage()
+        return {
+            "streaming": {
+                "window_size": usage["window_size"],
+                "loaded_layers": usage["loaded_layers"],
+                "layer_indices": usage["layer_indices"],
+                "total_mb": usage["total_mb"],
+            },
+        }
 
     def _forward_streaming(
         self,
@@ -57,7 +75,7 @@ class StreamingModelWrapper(nn.Module):
         cache: Optional[List],
         input_embeddings: Optional[mx.array],
     ) -> mx.array:
-        m = self.inner.model
+        m = self._model.model
         if input_embeddings is not None:
             h = input_embeddings
         else:
@@ -87,9 +105,9 @@ class StreamingModelWrapper(nn.Module):
 
         h = m.norm(h)
 
-        if self.inner.args.tie_word_embeddings:
+        if self._model.args.tie_word_embeddings:
             return m.embed_tokens.as_linear(h)
-        return self.inner.lm_head(h)
+        return self._model.lm_head(h)
 
     def __call__(
         self,
@@ -99,4 +117,4 @@ class StreamingModelWrapper(nn.Module):
     ):
         if self._streaming_enabled:
             return self._forward_streaming(inputs, cache, input_embeddings)
-        return self.inner(inputs, cache=cache, input_embeddings=input_embeddings)
+        return self._model(inputs, cache=cache, input_embeddings=input_embeddings)

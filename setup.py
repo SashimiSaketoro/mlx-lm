@@ -72,6 +72,7 @@ setup(
             "mlx_lm.manage = mlx_lm.manage:main",
             "mlx_lm.upload = mlx_lm.upload:main",
             "mlx_lm.split_model = mlx_lm.streaming.split_model:main",
+            "mlx_lm.streaming_benchmark = mlx_lm.streaming.benchmark:main",
         ]
     },
 )
